@@ -147,8 +147,21 @@ export async function importAnkiDeck(file: File): Promise<AnkiImportResult> {
       name: d.name,
     }));
 
-    // Get the main deck (not the default deck with id=1)
-    const mainDeck = ankiDecks.find(d => d.id !== 1) || ankiDecks[0];
+    // Select deck to import
+    let mainDeck: AnkiDeck;
+
+    if (ankiDecks.length === 1) {
+      // Only one deck, select it automatically
+      mainDeck = ankiDecks[0];
+    } else {
+      // Multiple decks found, require user selection
+      // For now, throw an error or handle as needed (e.g., return deck list)
+      throw new Error(
+        `Multiple decks found in Anki package: ${ankiDecks.map(d => d.name).join(', ')}. Please select which deck to import.`
+      );
+      // Alternatively, you could return the deck list for UI selection:
+      // return { availableDecks: ankiDecks };
+    }
 
     // Create a new deck in our system
     deck = storageService.createDeck(mainDeck.name);
