@@ -74,3 +74,49 @@ export const ALL_VOICES: VoiceName[] = ['Zephyr', 'Puck', 'Charon', 'Kore', 'Fen
 // Audio Constants
 export const INPUT_AUDIO_SAMPLE_RATE = 16000;
 export const OUTPUT_AUDIO_SAMPLE_RATE = 24000;
+
+// Anki Import Types
+export interface AnkiNote {
+  id: number;
+  guid: string;
+  mid: number;  // model id
+  mod: number;  // modification timestamp
+  tags: string;
+  flds: string; // fields separated by \x1f
+  sfld: string; // sort field
+  csum: number; // checksum
+}
+
+export interface AnkiCard {
+  id: number;
+  nid: number; // note id
+  did: number; // deck id
+  ord: number; // ordinal (which card template)
+  mod: number;
+  type: number; // 0=new, 1=learning, 2=review
+  queue: number; // -1=suspended, 0=new, 1=learning, 2=review
+  due: number;
+  ivl: number; // interval
+  factor: number;
+  reps: number;
+  lapses: number;
+  left: number;
+}
+
+export interface AnkiDeck {
+  id: number;
+  name: string;
+}
+
+export interface AnkiModel {
+  id: number;
+  name: string;
+  flds: Array<{ name: string; ord: number }>;
+  tmpls: Array<{ name: string; qfmt: string; afmt: string }>;
+}
+
+export interface AnkiImportResult {
+  deck: Deck;
+  cardsImported: number;
+  errors: string[];
+}
