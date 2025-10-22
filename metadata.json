@@ -1,0 +1,8 @@
+{
+  "name": "Copy of EchoCards - Voice-Powered Flashcards",
+  "description": "A hands-free, conversational flashcard app that uses FSRS for spaced repetition. Control your study session entirely with your voice, guided by a friendly AI assistant.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
