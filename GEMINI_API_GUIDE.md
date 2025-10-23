@@ -144,15 +144,13 @@ startConversation(query: string)        // "Why is that?" / "Explain more"
 ```
 
 #### **2. Deck Management (7 functions)**
-```typescript
 createDeck(deckName: string)           // "Create a deck called Physics"
 deleteDeck(deckName: string)           // "Delete the Capitals deck"
 listDecks()                            // "What decks do I have?"
 showDecks()                            // "Show all my decks"
 showImportView()                       // "I want to import a deck"
-generateDeckFromForm(topic, depth, numberOfCards)  // "Create 10 beginner cards about Python"
-generateDeckFromDocument(deckName, documentText)   // "Make flashcards from this text"
-```
+generateDeckFromForm(topic: string, depth: 'Beginner' | 'Intermediate' | 'Expert', numberOfCards: number)  // "Create 10 beginner cards about Python"
+generateDeckFromDocument(deckName: string, documentText: string)   // "Make flashcards from this text"
 
 #### **3. Card Management (5 functions)**
 ```typescript
