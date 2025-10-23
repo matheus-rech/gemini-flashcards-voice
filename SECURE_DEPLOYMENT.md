@@ -409,7 +409,7 @@ const getAi = () => {
 
 ### Next Steps
 
-Would you like me to implement **Solution 1** (user-provided API keys)? This would:
+The recommended action is to implement **Solution 1** (user-provided API keys). This would:
 - Remove API key from the build
 - Add a settings UI for users to enter their key
 - Update deployment workflow
