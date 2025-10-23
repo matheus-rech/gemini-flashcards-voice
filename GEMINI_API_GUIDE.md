@@ -239,7 +239,7 @@ const sessionPromise = ai.live.connect({
 }
 ```
 
-**3. App.tsx handles the function call (App.tsx:859-870):**
+**3. App.tsx handles the function call (App.tsx:744+):**
 ```typescript
 // Extract function call from message
 const functionCall = message.serverContent?.modelTurn?.parts?.[0]?.functionCall;
