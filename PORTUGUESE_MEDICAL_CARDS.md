@@ -115,7 +115,7 @@ Each card includes:
   question: string,        // Portuguese question
   answer: string,          // Concise Portuguese answer
   explanation: string,     // Detailed explanation in Portuguese
-  difficulty: 3-5,         // FSRS difficulty (3=easier, 5=harder)
+  difficulty: number,         // FSRS difficulty (e.g., 3 for easier, 5 for harder)
   // FSRS scheduling fields
   dueDate: Date,
   stability: 0,
