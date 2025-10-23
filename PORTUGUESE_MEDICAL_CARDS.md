@@ -216,7 +216,7 @@ To add more Portuguese medical cards:
      question: 'Pergunta em português?',
      answer: 'Resposta concisa',
      explanation: 'Explicação detalhada para contexto adicional.',
-     difficulty: 3-5,
+     difficulty: 4,           // Example difficulty (3=easier, 5=harder)
      // FSRS fields...
    }
    ```
