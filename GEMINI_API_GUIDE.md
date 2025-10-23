@@ -285,7 +285,7 @@ generateDeckFromForm({
 
 ### Function Calling Best Practices
 
-**System Instructions (services/geminiService.ts:234-310):**
+**System Instructions (services/geminiService.ts:280+):**
 The model is instructed on when and how to use each function:
 
 ```
