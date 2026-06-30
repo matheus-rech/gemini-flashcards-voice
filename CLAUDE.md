@@ -119,7 +119,7 @@ When enabled (`isConversationalModeEnabled`):
 ### Smart Deck Generation
 Two approaches:
 1. **From Form**: User specifies topic, depth level, and card count
-2. **From Document**: Parses uploaded text/CSV and generates relevant cards
+2. **From Document**: Parses an uploaded `.txt`/plain-text document and generates relevant cards (CSV files are handled separately by the `ImportDeckView` import flow, not this path)
 
 Both use `geminiService.generateDeck*()` methods which prompt Gemini models to create structured card data.
 
@@ -130,7 +130,7 @@ Both use `geminiService.generateDeck*()` methods which prompt Gemini models to c
 3. Generates 3 new targeted cards via `geminiService.generateTargetedCards()`
 4. Adds cards to same deck for focused practice
 
-This adaptively addresses user's weak points.
+This adaptively addresses the user's weak points.
 
 ## Code Patterns and Conventions
 
@@ -146,7 +146,7 @@ To add audio to playback:
 audioQueue.push(audioBuffer);
 processAudioQueue();
 ```
-Never manipulate queue during playback - let `processAudioQueue()` handle sequencing.
+Avoid manual manipulation (like shifting or reordering) during playback, as `processAudioQueue()` manages the sequence. However, clearing the queue (e.g., `audioQueue.length = 0`) is expected when stopping playback.
 
 ### Date Handling
 Cards use `Date` objects in memory but serialize to ISO strings in localStorage. Always convert when reading/writing:
@@ -187,6 +187,6 @@ Each user-facing feature should have a handler function that:
 
 ### New Service Function
 1. Add method to appropriate service (e.g., `geminiService`)
-2. Use `getAi()` to access initialized GoogleGenAI instance
+2. Use `getAi()` to access the initialized `GoogleGenAI` instance. Note: `getAi()` is currently internal to `geminiService.ts`; export it (or duplicate the init logic) if you're creating a new service file that needs it
 3. Handle errors gracefully - audio feedback is key for voice UI
 4. Consider caching or memoization for expensive operations

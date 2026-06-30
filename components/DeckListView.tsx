@@ -13,9 +13,11 @@ interface DeckListViewProps {
   onShowImageAnalysis: () => void;
   onShowTranscription: () => void;
   onShowTextAnalysis: () => void;
+  onShowAnkiImport: () => void;
+  onSyncAnki: (deckName: string) => void;
 }
 
-const DeckListView: React.FC<DeckListViewProps> = ({ decks, onStartReview, onShowImport, onShowSmartGeneration, onStrengthenWeakness, onShowImageGeneration, onShowImageAnalysis, onShowTranscription, onShowTextAnalysis }) => {
+const DeckListView: React.FC<DeckListViewProps> = ({ decks, onStartReview, onShowImport, onShowSmartGeneration, onStrengthenWeakness, onShowImageGeneration, onShowImageAnalysis, onShowTranscription, onShowTextAnalysis, onShowAnkiImport, onSyncAnki }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredDecks = decks.filter(deck =>
@@ -59,17 +61,23 @@ const DeckListView: React.FC<DeckListViewProps> = ({ decks, onStartReview, onSho
             >
               Transcribe Audio
             </button>
-            <button 
+            <button
               onClick={onShowImport}
               className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition-colors whitespace-nowrap"
             >
               Import Deck
             </button>
-            <button 
+            <button
               onClick={onShowSmartGeneration}
               className="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg font-semibold transition-colors whitespace-nowrap"
             >
               Smart Create Deck
+            </button>
+            <button
+              onClick={onShowAnkiImport}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 rounded-lg font-semibold transition-colors whitespace-nowrap"
+            >
+              Import from Anki
             </button>
         </div>
       </div>
@@ -92,6 +100,14 @@ const DeckListView: React.FC<DeckListViewProps> = ({ decks, onStartReview, onSho
                 >
                   Strengthen Weak Points
                 </button>
+                {deck.ankiDeckName && (
+                  <button
+                    onClick={() => onSyncAnki(deck.name)}
+                    className="w-full px-4 py-2 bg-rose-700 hover:bg-rose-800 rounded-lg font-semibold text-sm transition-colors"
+                  >
+                    Sync with Anki
+                  </button>
+                )}
               </div>
             </div>
           ))}

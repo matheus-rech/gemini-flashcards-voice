@@ -6,12 +6,14 @@ import { storageService } from './services/storageService';
 import { calculateNextReview } from './services/fsrs';
 import { geminiService } from './services/geminiService';
 import { knowledgeBaseService } from './services/knowledgeBaseService';
+import { ankiConnectService, mapAnkiNoteToCard } from './services/ankiConnectService';
 import CardView from './components/CardView';
 import StatusIndicator from './components/StatusIndicator';
 import TranscriptView from './components/TranscriptView';
 import DeckListView from './components/DeckListView';
 import AudioControls from './components/AudioControls';
 import ImportDeckView from './components/ImportDeckView';
+import AnkiImportView from './components/AnkiImportView';
 import CardStatsView from './components/CardStatsView';
 import ToggleSwitch from './components/ToggleSwitch';
 import ImageGenerationView from './components/ImageGenerationView';
@@ -82,6 +84,12 @@ const App: React.FC = () => {
 
   // Text Analysis State
   const [isAnalyzingText, setIsAnalyzingText] = useState(false);
+
+  // Anki Integration State
+  const [ankiAvailable, setAnkiAvailable] = useState<boolean | null>(null);
+  const [ankiNeedsPermission, setAnkiNeedsPermission] = useState(false);
+  const [ankiDeckNames, setAnkiDeckNames] = useState<string[]>([]);
+  const [isAnkiLoading, setIsAnkiLoading] = useState(false);
   const [textAnalysisResult, setTextAnalysisResult] = useState<string | null>(null);
 
   // Gemini Live Session
@@ -239,6 +247,14 @@ const App: React.FC = () => {
       const rating = Rating[ratingStr];
       const updatedCard = calculateNextReview(currentCard, rating);
       storageService.updateCard(updatedCard);
+
+      // Fire-and-forget push to Anki if this card is linked. Never awaited,
+      // never blocks the voice review flow, silently no-ops if Anki is
+      // unreachable (avoids spamming errors on every single card).
+      if (updatedCard.ankiCardId) {
+        ankiConnectService.answerCard(updatedCard.ankiCardId, rating as 1 | 2 | 3 | 4)
+          .catch(() => { /* Anki unreachable or card not found — ignore */ });
+      }
 
       // Update progress counters
       const newSessionProgress = sessionProgressCount + 1;
@@ -427,6 +443,8 @@ const App: React.FC = () => {
     setTranscriptionResult(null);
     setIsAnalyzingText(false);
     setTextAnalysisResult(null);
+    setAnkiNeedsPermission(false);
+    setAnkiDeckNames([]);
     if(mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
@@ -457,7 +475,164 @@ const App: React.FC = () => {
     setStatusText(text);
     playTts(text);
   }, [playTts]);
-  
+
+  const handleShowAnkiImportView = useCallback(async () => {
+    setSessionState(SessionState.ANKI_IMPORT);
+    setIsAnkiLoading(true);
+    setStatusText("Checking for Anki Desktop...");
+    playTts("Let me check if Anki Desktop is running on this computer.");
+
+    const available = await ankiConnectService.isAvailable();
+    setAnkiAvailable(available);
+
+    if (!available) {
+      setIsAnkiLoading(false);
+      const text = "I couldn't reach Anki Desktop. Please make sure Anki is running on this computer with the AnkiConnect add-on installed, then try again.";
+      setStatusText(text);
+      playTts(text);
+      return;
+    }
+
+    const granted = await ankiConnectService.requestPermission();
+    if (!granted) {
+      setAnkiNeedsPermission(true);
+      setIsAnkiLoading(false);
+      const text = "Anki needs your permission. Please look at Anki Desktop and approve the connection request, then try again.";
+      setStatusText(text);
+      playTts(text);
+      return;
+    }
+
+    setAnkiNeedsPermission(false);
+    const names = await ankiConnectService.deckNames();
+    setAnkiDeckNames(names);
+    setIsAnkiLoading(false);
+    const text = "Here are your Anki decks. Pick one to import into EchoCards.";
+    setStatusText("Select an Anki deck to import.");
+    playTts(text);
+  }, [playTts]);
+
+  const handleRetryAnkiPermission = useCallback(async () => {
+    setIsAnkiLoading(true);
+    const available = await ankiConnectService.isAvailable();
+    setAnkiAvailable(available);
+    if (!available) {
+      setIsAnkiLoading(false);
+      const text = "Still couldn't reach Anki Desktop. Please make sure Anki is running with the AnkiConnect add-on installed.";
+      setStatusText(text);
+      playTts(text);
+      return;
+    }
+    const granted = await ankiConnectService.requestPermission();
+    setAnkiNeedsPermission(!granted);
+    if (granted) {
+      const names = await ankiConnectService.deckNames();
+      setAnkiDeckNames(names);
+      playTts("Great, you're connected. Here are your Anki decks.");
+    } else {
+      playTts("I still don't have permission. Please check Anki Desktop for the approval popup.");
+    }
+    setIsAnkiLoading(false);
+  }, [playTts]);
+
+  const handleImportAnkiDeck = useCallback(async (ankiDeckName: string, localDeckName: string) => {
+    setSessionState(SessionState.PROCESSING);
+    setStatusText(`Importing "${ankiDeckName}" from Anki...`);
+    playTts(`Okay, importing the "${ankiDeckName}" deck from Anki. This might take a moment.`);
+
+    try {
+      const noteIds = await ankiConnectService.findNotes(ankiDeckName);
+      const notes = await ankiConnectService.notesInfo(noteIds);
+      const cardIds = await ankiConnectService.findCards(ankiDeckName);
+      const cardsInfo = await ankiConnectService.cardsInfo(cardIds);
+      // Map each note to its first generated card id (Basic note type = 1:1 note:card).
+      const noteIdToCardId = new Map<number, number>();
+      cardsInfo.forEach(ci => { if (!noteIdToCardId.has(ci.note)) noteIdToCardId.set(ci.note, ci.cardId); });
+
+      const newDeck = storageService.createDeck(localDeckName);
+      storageService.updateDeck({ ...newDeck, ankiDeckName });
+
+      let imported = 0;
+      notes.forEach(note => {
+        const mapped = mapAnkiNoteToCard(note);
+        if (!mapped.question || !mapped.answer) return; // skip unmappable notes (e.g. Cloze)
+        const newCard = storageService.createCard(newDeck.id, mapped.question, mapped.answer, mapped.explanation);
+        storageService.updateCard({
+          ...newCard,
+          ankiNoteId: note.noteId,
+          ankiCardId: noteIdToCardId.get(note.noteId),
+        });
+        imported++;
+      });
+
+      setDecks(storageService.getDecks());
+      setSessionState(SessionState.AWAITING_COMMAND);
+      const text = `Done! I imported ${imported} cards from "${ankiDeckName}" into your new "${localDeckName}" deck. This deck is now linked, so you can say "sync with Anki" anytime to pull in reviews you do directly in Anki.`;
+      setStatusText(text);
+      playTts(text);
+    } catch (error) {
+      console.error('Anki import failed:', error);
+      setSessionState(SessionState.AWAITING_COMMAND);
+      const text = "Sorry, something went wrong importing that deck from Anki. Please make sure Anki Desktop is still running and try again.";
+      setStatusText(text);
+      playTts(text);
+    }
+  }, [playTts]);
+
+  const handleSyncAnkiDeck = useCallback(async (deckName: string) => {
+    const targetDeck = decks.find(d => d.name.toLowerCase() === deckName.toLowerCase());
+    if (!targetDeck || !targetDeck.ankiDeckName) {
+      const text = `Sorry, "${deckName}" isn't linked to an Anki deck. Import it from Anki first.`;
+      setStatusText(text);
+      playTts(text);
+      return;
+    }
+
+    setSessionState(SessionState.ANKI_SYNCING);
+    setStatusText(`Syncing "${deckName}" with Anki...`);
+    playTts(`Okay, syncing "${deckName}" with Anki. One moment.`);
+
+    try {
+      const available = await ankiConnectService.isAvailable();
+      if (!available) {
+        throw new Error('Anki not reachable');
+      }
+      const meta = storageService.getAnkiSyncMeta();
+      const lastSyncedTime = meta[targetDeck.id]?.lastSyncedReviewTime ?? 0;
+
+      const reviews = await ankiConnectService.cardReviewsSince(targetDeck.ankiDeckName, lastSyncedTime);
+      const sorted = [...reviews].sort((a, b) => a[0] - b[0]);
+
+      let applied = 0;
+      let maxReviewTime = lastSyncedTime;
+      for (const [reviewTime, cardId, , ease] of sorted) {
+        if (reviewTime <= lastSyncedTime) continue; // already applied
+        const card = storageService.findCardByAnkiCardId(cardId);
+        if (card && ease >= 1 && ease <= 4) {
+          const updated = calculateNextReview(card, ease as Rating);
+          storageService.updateCard(updated);
+          applied++;
+        }
+        maxReviewTime = Math.max(maxReviewTime, reviewTime);
+      }
+      storageService.setAnkiSyncMetaForDeck(targetDeck.id, maxReviewTime);
+
+      setSessionState(SessionState.AWAITING_COMMAND);
+      const text = applied > 0
+        ? `Sync complete. I applied ${applied} review${applied === 1 ? '' : 's'} you did in Anki to "${deckName}".`
+        : `Sync complete. No new reviews found in Anki for "${deckName}".`;
+      setStatusText(text);
+      playTts(text);
+    } catch (error) {
+      console.error('Anki sync failed:', error);
+      setSessionState(SessionState.AWAITING_COMMAND);
+      const text = "Sorry, I couldn't sync with Anki. Please make sure Anki Desktop is running and try again.";
+      setStatusText(text);
+      playTts(text);
+    }
+  }, [decks, playTts]);
+
+
   const processAndSaveGeneratedCards = useCallback((deckName: string, generatedCards: {question: string, answer: string, explanation?: string}[]) => {
      if (generatedCards && generatedCards.length > 0) {
       const newDeck = storageService.createDeck(deckName);
@@ -733,6 +908,8 @@ const App: React.FC = () => {
       case 'updateCardContent': handleUpdateCardContent({ newQuestion: args.newQuestion as string | undefined, newAnswer: args.newAnswer as string | undefined, newExplanation: args.newExplanation as string | undefined }); break;
       case 'goBack': handleGoBack(); break;
       case 'showImportView': handleShowImportView(); break;
+      case 'showAnkiImportView': handleShowAnkiImportView(); break;
+      case 'syncAnkiDeck': handleSyncAnkiDeck(args.deckName as string); break;
       case 'showSmartGenerationView': handleShowSmartGenerationView(); break;
       case 'generateDeckFromForm': handleGenerateDeckFromForm(args.topic as string, args.depth as string, args.numberOfCards as number); break;
       case 'generateDeckFromDocument': handleGenerateDeckFromDocument(args.deckName as string, args.documentText as string); break;
@@ -749,7 +926,7 @@ const App: React.FC = () => {
     sessionRef.current?.sendToolResponse({
       functionResponses: { id: fc.id, name: fc.name, response: { result: 'OK' } }
     });
-  }, [handleStartReview, handleShowAnswer, handleRateCard, handleStartConversation, handleSetStudyGoal, handleCreateDeck, handleDeleteDeck, handleListDecks, handleShowDecks, handleCreateCard, handleFindCardToEdit, handleUpdateCardContent, handleGoBack, handleShowImportView, handleShowSmartGenerationView, handleGenerateDeckFromForm, handleGenerateDeckFromDocument, handleShowCardStats, handleExplainCard, handleGenerateCardsFromWeakness, handleShowImageGenerationView, handleGenerateImage, handleShowImageAnalysisView, handleShowTranscriptionView, handleShowTextAnalysisView]);
+  }, [handleStartReview, handleShowAnswer, handleRateCard, handleStartConversation, handleSetStudyGoal, handleCreateDeck, handleDeleteDeck, handleListDecks, handleShowDecks, handleCreateCard, handleFindCardToEdit, handleUpdateCardContent, handleGoBack, handleShowImportView, handleShowAnkiImportView, handleSyncAnkiDeck, handleShowSmartGenerationView, handleGenerateDeckFromForm, handleGenerateDeckFromDocument, handleShowCardStats, handleExplainCard, handleGenerateCardsFromWeakness, handleShowImageGenerationView, handleGenerateImage, handleShowImageAnalysisView, handleShowTranscriptionView, handleShowTextAnalysisView]);
 
   const handleLiveMessage = useCallback(async (message: LiveServerMessage) => {
     if (message.serverContent?.inputTranscription) {
@@ -849,9 +1026,19 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch(sessionState) {
       case SessionState.SHOWING_DECKS:
-        return <DeckListView decks={decks} onStartReview={handleStartReview} onShowImport={handleShowImportView} onShowSmartGeneration={handleShowSmartGenerationView} onStrengthenWeakness={handleGenerateCardsFromWeakness} onShowImageGeneration={handleShowImageGenerationView} onShowImageAnalysis={handleShowImageAnalysisView} onShowTranscription={handleShowTranscriptionView} onShowTextAnalysis={handleShowTextAnalysisView} />;
+        return <DeckListView decks={decks} onStartReview={handleStartReview} onShowImport={handleShowImportView} onShowSmartGeneration={handleShowSmartGenerationView} onStrengthenWeakness={handleGenerateCardsFromWeakness} onShowImageGeneration={handleShowImageGenerationView} onShowImageAnalysis={handleShowImageAnalysisView} onShowTranscription={handleShowTranscriptionView} onShowTextAnalysis={handleShowTextAnalysisView} onShowAnkiImport={handleShowAnkiImportView} onSyncAnki={handleSyncAnkiDeck} />;
       case SessionState.IMPORTING_DECK:
         return <ImportDeckView onImport={handleImportDeck} onCancel={handleGoBack} />;
+      case SessionState.ANKI_IMPORT:
+        return <AnkiImportView
+          isLoading={isAnkiLoading}
+          isAvailable={ankiAvailable}
+          needsPermission={ankiNeedsPermission}
+          ankiDeckNames={ankiDeckNames}
+          onRequestPermission={handleRetryAnkiPermission}
+          onImportDeck={handleImportAnkiDeck}
+          onCancel={handleGoBack}
+        />;
       case SessionState.SMART_GENERATION:
         return <SmartGenerationView onGenerateFromForm={handleGenerateDeckFromForm} onGenerateFromDocument={handleGenerateDeckFromDocument} onCancel={handleGoBack} />;
       case SessionState.SHOWING_CARD_STATS:
