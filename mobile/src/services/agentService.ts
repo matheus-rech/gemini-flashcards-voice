@@ -49,7 +49,7 @@ const SYSTEM_INSTRUCTION =
   `When the user wants to study on their phone, call startReview; to drive the desktop reviewer directly, ` +
   `use openDeckReview + getCurrentCard + showAnswer + answerCurrentCard.`;
 
-const TOOL_DECLARATIONS = [
+export const TOOL_DECLARATIONS = [
   {
     name: 'listDecks',
     description: 'Lists every deck with scheduler-accurate counts of new, learning, and review cards currently queued.',
@@ -136,7 +136,9 @@ const TOOL_DECLARATIONS = [
   },
 ];
 
-async function executeTool(host: string, call: FunctionCall, appActions: AgentAppActions): Promise<Record<string, unknown>> {
+// Also used by the realtime voice bridge (OpenAI Realtime tool calls from a
+// speech-to-speech server are executed through this same dispatcher).
+export async function executeAnkiTool(host: string, call: FunctionCall, appActions: AgentAppActions): Promise<Record<string, unknown>> {
   try {
     switch (call.name) {
       case 'listDecks': {
@@ -243,7 +245,7 @@ export const agentService = {
       contents.push({ role: 'model', parts });
       const responses: GeminiPart[] = [];
       for (const { functionCall } of functionCalls) {
-        const result = await executeTool(host, functionCall, appActions);
+        const result = await executeAnkiTool(host, functionCall, appActions);
         responses.push({ functionResponse: { name: functionCall.name, response: result } });
       }
       contents.push({ role: 'user', parts: responses });

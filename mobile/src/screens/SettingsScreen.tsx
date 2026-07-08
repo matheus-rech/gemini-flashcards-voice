@@ -13,6 +13,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onSave, onCan
   const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey);
   const [ankiConnectHost, setAnkiConnectHost] = useState(settings.ankiConnectHost);
   const [speakCards, setSpeakCards] = useState(settings.speakCards);
+  const [realtimeVoiceUrl, setRealtimeVoiceUrl] = useState(settings.realtimeVoiceUrl);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
@@ -47,6 +48,23 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onSave, onCan
         keyboardType="url"
       />
 
+      <Text style={styles.label}>Realtime voice server</Text>
+      <Text style={styles.hint}>
+        OpenAI-Realtime-compatible WebSocket URL for Live Voice. For the local (no-cloud) option, run
+        huggingface/speech-to-speech on the Anki computer: speech-to-speech --mode realtime --ws_port 8766
+        (port 8765 is already taken by AnkiConnect), then use ws://&lt;that computer&gt;:8766/v1/realtime.
+      </Text>
+      <TextInput
+        style={styles.input}
+        value={realtimeVoiceUrl}
+        onChangeText={setRealtimeVoiceUrl}
+        placeholder="ws://192.168.1.20:8766/v1/realtime"
+        placeholderTextColor={colors.textMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+      />
+
       <View style={styles.switchRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.label}>Speak aloud</Text>
@@ -57,7 +75,12 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onSave, onCan
 
       <TouchableOpacity
         style={[styles.button, { backgroundColor: colors.primary }]}
-        onPress={() => onSave({ geminiApiKey: geminiApiKey.trim(), ankiConnectHost: ankiConnectHost.trim().replace(/\/$/, ''), speakCards })}
+        onPress={() => onSave({
+          geminiApiKey: geminiApiKey.trim(),
+          ankiConnectHost: ankiConnectHost.trim().replace(/\/$/, ''),
+          speakCards,
+          realtimeVoiceUrl: realtimeVoiceUrl.trim(),
+        })}
       >
         <Text style={styles.buttonText}>Save</Text>
       </TouchableOpacity>

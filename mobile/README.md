@@ -21,6 +21,27 @@ A React Native (Expo SDK 57) companion app for Anki. **Anki Desktop is the singl
 
 Your Gemini API key is entered in Settings and stored only on-device — it is never baked into the binary.
 
+## Realtime voice (cloud-independent)
+
+The **Live Voice** screen holds a hands-free, interruptible conversation with the agent over the **OpenAI Realtime WebSocket protocol** — which makes the speech backend interchangeable:
+
+- **Local / no-cloud (fallback when cloud models don't work, or the main option):** run [huggingface/speech-to-speech](https://github.com/huggingface/speech-to-speech) on the same computer as Anki. It's a full local pipeline (Silero VAD → Whisper/Parakeet STT → any LLM incl. llama.cpp → Qwen3-TTS/Kokoro) that serves the Realtime protocol:
+
+  ```bash
+  pip install speech-to-speech   # Python 3.10+, CUDA / Apple Silicon / CPU
+  speech-to-speech --mode realtime --ws_port 8766
+  ```
+
+  > ⚠️ **Port conflict:** speech-to-speech ALSO defaults to port **8765**, which AnkiConnect already uses on that machine. Always pass `--ws_port 8766`.
+
+  Then set **Settings → Realtime voice server** to `ws://<that computer>:8766/v1/realtime`. For a fully offline LLM, point it at a local llama.cpp server (`--responses_api_base_url http://127.0.0.1:8080/v1`).
+
+- **Cloud:** any endpoint speaking the same protocol works — just change the URL.
+
+Audio is 16 kHz mono PCM16 both ways; the server's VAD handles turn-taking and barge-in. **Anki tool calls flow through the voice channel too**: the session registers the same tools as the text agent (see screen, click buttons, add cards…), the app executes them against AnkiConnect, and returns results to the voice LLM mid-conversation.
+
+Platform note: the full mic ↔ speaker loop currently ships in the **web build** (`npm run web` on the desktop next to Anki — the natural place for realtime voice). Native iOS/Android needs a raw-PCM microphone-stream module (e.g. `react-native-live-audio-stream`) wired into `VoiceScreen`; until then phones use the Echo Agent text chat, which still speaks its replies.
+
 ## Running locally
 
 ```bash

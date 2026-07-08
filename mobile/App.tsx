@@ -8,6 +8,7 @@ import { colors } from './src/theme';
 import HomeScreen, { ConnectionState } from './src/screens/HomeScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import AgentScreen from './src/screens/AgentScreen';
+import VoiceScreen from './src/screens/VoiceScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 // EchoCards Command Center: Anki Desktop is the source of truth for every
@@ -18,6 +19,7 @@ type Screen =
   | { name: 'home' }
   | { name: 'review'; deckName: string }
   | { name: 'agent' }
+  | { name: 'voice' }
   | { name: 'settings' };
 
 export default function App() {
@@ -88,7 +90,15 @@ export default function App() {
           onRefresh={handleRefresh}
           onStartReview={deckName => setScreen({ name: 'review', deckName })}
           onShowAgent={() => setScreen({ name: 'agent' })}
+          onShowVoice={() => setScreen({ name: 'voice' })}
           onShowSettings={() => setScreen({ name: 'settings' })}
+        />
+      )}
+      {screen.name === 'voice' && (
+        <VoiceScreen
+          settings={settings}
+          onStartReview={deckName => setScreen({ name: 'review', deckName })}
+          onBack={goHome}
         />
       )}
       {screen.name === 'review' && (

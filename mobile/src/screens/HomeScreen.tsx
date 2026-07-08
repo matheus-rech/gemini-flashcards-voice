@@ -16,11 +16,12 @@ interface HomeScreenProps {
   onRefresh: () => void;
   onStartReview: (deckName: string) => void;
   onShowAgent: () => void;
+  onShowVoice: () => void;
   onShowSettings: () => void;
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({
-  connection, decks, isRefreshing, ankiHost, onRefresh, onStartReview, onShowAgent, onShowSettings,
+  connection, decks, isRefreshing, ankiHost, onRefresh, onStartReview, onShowAgent, onShowVoice, onShowSettings,
 }) => {
   return (
     <View style={styles.container}>
@@ -30,6 +31,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
       <View style={styles.actionsRow}>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.accent }]} onPress={onShowAgent}>
           <Text style={styles.actionText}>🤖 Echo Agent</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.anki }]} onPress={onShowVoice}>
+          <Text style={styles.actionText}>🎙 Live Voice</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.surfaceAlt }]} onPress={onShowSettings}>
           <Text style={styles.actionText}>Settings</Text>
