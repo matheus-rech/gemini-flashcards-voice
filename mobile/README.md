@@ -51,11 +51,25 @@ npm start          # scan the QR code with Expo Go
 npm run web        # or run in a browser
 ```
 
-## Building an installable APK
+## Installing on your devices
 
-Every push builds one in CI: see the **Mobile app (typecheck + Android APK)** job in GitHub Actions and download the `echocards-android-apk` artifact. It's signed with the standard debug keystore — ready to sideload onto any Android device. For a Play Store release, configure a real signing keystore (or use EAS Build: `npx eas build -p android`).
+Every push builds installable files in GitHub Actions (repo → **Actions** → latest run → **Artifacts**):
 
-iOS builds require a macOS runner or EAS Build with Apple credentials — not wired up in CI.
+| Device | Artifact | How to install |
+|---|---|---|
+| **Android** | `echocards-android-apk` | Download the `.apk`, open it on the phone (allow "install unknown apps"). Debug-signed, sideload-ready. |
+| **iPhone / iPad** | `echocards-ios-unsigned-ipa` | Download `EchoCards-unsigned.ipa`, then sideload with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io) using any free Apple ID (re-signs it for your device; free-ID installs last 7 days, then re-sideload). |
+| **Desktop (next to Anki)** | `echocards-web-dist` | The web build of the *original* voice web app; for this command center run `npm run web` — the best host for Live Voice. |
+
+**App Store / Play Store grade builds** (real signing, no sideloading): `eas.json` is included — run `npx eas build -p android` / `npx eas build -p ios` with an [Expo account](https://expo.dev) (iOS store builds need an Apple Developer membership). CI note: the iOS job runs on a macOS runner — free for public repos, 10× minute cost on private ones.
+
+### Apple Watch
+
+watchOS can't run Expo/React Native apps, so there is no direct watch build — but you don't need one to "do Anki whenever you want":
+
+1. **Today**: reviews are fully voice-driven — phone in your pocket, cards read aloud, and (via Live Voice) rate by speaking. The watch isn't required for hands-free use.
+2. **Realistic watch path (future feature)**: iPhone notification **actions** mirror to Apple Watch. A background task can fetch the next due card via AnkiConnect and post a notification whose Again/Hard/Good/Easy action buttons are tappable *from the watch face* (`expo-notifications` supports action categories). That's the practical way to rate cards from a wrist without a native watchOS app.
+3. **Full native watch app**: possible only as a separate SwiftUI companion project — out of scope for this codebase today.
 
 ## Connecting to Anki from a phone
 

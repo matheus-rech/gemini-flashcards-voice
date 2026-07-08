@@ -81,3 +81,61 @@ jobs:
           path: mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: error
+
+  ios-ipa:
+    name: Mobile app (iOS unsigned IPA, sideloadable)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          CI: 1
+
+      - name: Install CocoaPods dependencies
+        run: pod install
+        working-directory: mobile/ios
+
+      - name: Build unsigned Release app
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls ios/*.xcworkspace -d | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP_PATH=$(ls -d ios/build/Build/Products/Release-iphoneos/*.app | head -1)
+          mkdir -p ipa/Payload
+          cp -R "$APP_PATH" ipa/Payload/
+          cd ipa && zip -qry EchoCards-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocards-ios-unsigned-ipa
+          path: mobile/ipa/EchoCards-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
