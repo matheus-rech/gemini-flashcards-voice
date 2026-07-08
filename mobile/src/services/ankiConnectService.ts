@@ -2,16 +2,21 @@
 // exposes a JSON-RPC-style HTTP API — by default on port 8765 of the machine
 // running Anki Desktop.
 //
-// Anki is the SOURCE OF TRUTH: this app never keeps its own copy of decks,
-// cards, or scheduling state. Reviews pull due cards straight from Anki and
-// ratings are applied through Anki's own scheduler via `answerCards`.
+// Anki is the SOURCE OF TRUTH and reviews DRIVE ANKI'S REAL REVIEWER WINDOW
+// via AnkiConnect's graphical (gui*) actions. This is deliberate — verified
+// against the Anki source (rslib/src/scheduler/queue/builder/*): a raw
+// `findCards "is:due"` query misses new cards entirely (is:due excludes
+// c.type = New) and ignores daily new/review limits, sibling burying, and
+// the v3 scheduler's gather/interleave ordering. Only Anki's own reviewer
+// produces the true next-card sequence, so we remote-control it: the app
+// "sees" the current card (guiCurrentCard) and "clicks" the real buttons
+// (guiShowAnswer / guiAnswerCard, ease 1-4 = Again/Hard/Good/Easy exactly as
+// in qt/aqt/reviewer.py's _answerCard).
 //
 // On a phone, "localhost" is the phone itself, so the host must be the LAN
 // address of the computer running Anki (e.g. http://192.168.1.20:8765) and
 // AnkiConnect's config must allow LAN connections:
 //   "webBindAddress": "0.0.0.0", "webCorsOriginList": ["*"]
-
-import { AnkiReviewCard } from '../types';
 
 const ANKI_CONNECT_VERSION = 6;
 
@@ -20,13 +25,22 @@ interface AnkiConnectResponse<T> {
   error: string | null;
 }
 
-export interface AnkiCardInfo {
+// What Anki's reviewer is currently showing — the agent's "eyes".
+export interface AnkiCurrentCard {
   cardId: number;
-  note: number;
   deckName: string;
   question: string; // rendered front HTML
   answer: string;   // rendered back HTML
-  fields: Record<string, { value: string; order: number }>;
+  buttons: number[];       // e.g. [1,2,3,4]
+  nextReviews: string[];   // e.g. ["<1m","<10m","4d","12d"], aligned with buttons
+}
+
+export interface AnkiDeckStats {
+  name: string;
+  newCount: number;
+  learnCount: number;
+  reviewCount: number;
+  totalInDeck: number;
 }
 
 async function invoke<T = unknown>(host: string, action: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -91,34 +105,20 @@ export const ankiConnectService = {
     return invoke<number>(host, 'createDeck', { deck: deckName });
   },
 
-  countDueCards: async (host: string, ankiDeckName: string): Promise<number> => {
-    const ids = await invoke<number[]>(host, 'findCards', { query: `deck:"${ankiDeckName}" is:due` });
-    return ids.length;
-  },
-
-  // Pull the current due queue for a deck, rendered and stripped to plain
-  // text, capped to keep payloads sane on mobile.
-  getDueCards: async (host: string, ankiDeckName: string, limit = 100): Promise<AnkiReviewCard[]> => {
-    const ids = await invoke<number[]>(host, 'findCards', { query: `deck:"${ankiDeckName}" is:due` });
-    if (ids.length === 0) return [];
-    const info = await invoke<AnkiCardInfo[]>(host, 'cardsInfo', { cards: ids.slice(0, limit) });
-    return info.map(ci => {
-      const q = stripHtml(ci.question);
-      // Anki's rendered answer usually contains the question above a divider;
-      // drop the leading question text if present so we speak only the back.
-      const fullAnswer = stripHtml(ci.answer);
-      const answer = fullAnswer.startsWith(q) ? fullAnswer.slice(q.length).trim() : fullAnswer;
-      return { cardId: ci.cardId, question: q, answer };
-    });
-  },
-
-  // Applies one rating through Anki's own scheduler — identical to clicking
-  // Again/Hard/Good/Easy in Anki's reviewer. Anki decides the next due date.
-  answerCard: async (host: string, cardId: number, ease: 1 | 2 | 3 | 4): Promise<boolean> => {
-    const results = await invoke<boolean[]>(host, 'answerCards', {
-      answers: [{ cardId, ease }],
-    });
-    return results[0] ?? false;
+  // Scheduler-accurate per-deck counts (new/learn/review), same numbers the
+  // deck browser shows — NOT a raw card search.
+  getDeckStats: async (host: string, deckNames?: string[]): Promise<AnkiDeckStats[]> => {
+    const decks = deckNames ?? await invoke<string[]>(host, 'deckNames');
+    const raw = await invoke<Record<string, { name: string; new_count: number; learn_count: number; review_count: number; total_in_deck: number }>>(
+      host, 'getDeckStats', { decks },
+    );
+    return Object.values(raw).map(d => ({
+      name: d.name,
+      newCount: d.new_count,
+      learnCount: d.learn_count,
+      reviewCount: d.review_count,
+      totalInDeck: d.total_in_deck,
+    }));
   },
 
   // Adds notes (Basic model) directly into an Anki deck. Returns the number
@@ -135,18 +135,59 @@ export const ankiConnectService = {
     return results.filter(r => r !== null).length;
   },
 
-  // Per-deck due summary for the home screen and the agent.
-  getDeckSummaries: async (host: string): Promise<{ name: string; dueCount: number }[]> => {
-    const names = await invoke<string[]>(host, 'deckNames');
-    const summaries = await Promise.all(names.map(async name => ({
-      name,
-      dueCount: await ankiConnectService.countDueCards(host, name).catch(() => 0),
-    })));
-    return summaries;
-  },
-
   // Triggers a collection sync with AnkiWeb on the desktop app.
   sync: async (host: string): Promise<void> => {
     await invoke<null>(host, 'sync');
+  },
+
+  // ---- GUI driver: remote-controls the actual Anki Desktop window ----
+
+  // Opens Anki's real reviewer for a deck — Anki's own queue (daily limits,
+  // sibling burying, learn-ahead, new/review interleaving) decides card order.
+  guiDeckReview: async (host: string, deckName: string): Promise<boolean> => {
+    return invoke<boolean>(host, 'guiDeckReview', { name: deckName });
+  },
+
+  // "Sees" what the reviewer is showing right now. Returns null when the
+  // reviewer isn't active (e.g. the deck is finished — Anki shows congrats).
+  guiCurrentCard: async (host: string): Promise<AnkiCurrentCard | null> => {
+    try {
+      const raw = await invoke<{
+        cardId: number; deckName: string; question: string; answer: string;
+        buttons?: number[]; nextReviews?: string[];
+      } | null>(host, 'guiCurrentCard');
+      if (!raw) return null;
+      return {
+        cardId: raw.cardId,
+        deckName: raw.deckName,
+        question: raw.question,
+        answer: raw.answer,
+        buttons: raw.buttons ?? [1, 2, 3, 4],
+        nextReviews: raw.nextReviews ?? [],
+      };
+    } catch {
+      return null; // "Gui review is not currently active"
+    }
+  },
+
+  // Flips the current card in the Anki window (reveals the answer).
+  guiShowAnswer: async (host: string): Promise<boolean> => {
+    return invoke<boolean>(host, 'guiShowAnswer');
+  },
+
+  // Clicks a rating button on the CURRENT card in Anki's reviewer.
+  // ease 1-4 = Again/Hard/Good/Easy (qt/aqt/reviewer.py _answerCard).
+  guiAnswerCard: async (host: string, ease: 1 | 2 | 3 | 4): Promise<boolean> => {
+    return invoke<boolean>(host, 'guiAnswerCard', { ease });
+  },
+
+  // Undoes the last action in Anki (like pressing Ctrl+Z there).
+  guiUndo: async (host: string): Promise<boolean> => {
+    return invoke<boolean>(host, 'guiUndo');
+  },
+
+  // Returns Anki to the deck browser screen.
+  guiDeckBrowser: async (host: string): Promise<void> => {
+    await invoke<unknown>(host, 'guiDeckBrowser');
   },
 };

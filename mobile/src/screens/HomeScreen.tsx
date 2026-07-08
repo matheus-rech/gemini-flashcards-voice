@@ -73,17 +73,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
           ListHeaderComponent={<Text style={styles.connected}>● Connected to Anki — {decks.length} deck{decks.length === 1 ? '' : 's'}</Text>}
           ListEmptyComponent={<Text style={styles.empty}>No decks in Anki yet. Ask the agent to create one.</Text>}
-          renderItem={({ item: deck }) => (
-            <TouchableOpacity style={styles.deckCard} onPress={() => onStartReview(deck.name)} disabled={deck.dueCount === 0}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.deckName}>{deck.name}</Text>
-                <Text style={styles.deckMeta}>{deck.dueCount > 0 ? `${deck.dueCount} due — tap to review` : 'Nothing due'}</Text>
-              </View>
-              {deck.dueCount > 0 && (
-                <View style={styles.dueBadge}><Text style={styles.dueBadgeText}>{deck.dueCount}</Text></View>
-              )}
-            </TouchableOpacity>
-          )}
+          renderItem={({ item: deck }) => {
+            const queued = deck.newCount + deck.learnCount + deck.reviewCount;
+            return (
+              <TouchableOpacity style={styles.deckCard} onPress={() => onStartReview(deck.name)} disabled={queued === 0}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.deckName}>{deck.name}</Text>
+                  <Text style={styles.deckMeta}>
+                    {queued > 0
+                      ? `${deck.newCount} new · ${deck.learnCount} learning · ${deck.reviewCount} review — tap to study`
+                      : 'Nothing queued'}
+                  </Text>
+                </View>
+                {queued > 0 && (
+                  <View style={styles.dueBadge}><Text style={styles.dueBadgeText}>{queued}</Text></View>
+                )}
+              </TouchableOpacity>
+            );
+          }}
         />
       )}
     </View>

@@ -16,17 +16,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   speakCards: true,
 };
 
-// A due card pulled live from Anki for a review session. `question`/`answer`
-// are plain text stripped from Anki's rendered HTML.
-export interface AnkiReviewCard {
-  cardId: number;
-  question: string;
-  answer: string;
-}
-
+// Scheduler-accurate per-deck queue counts, as Anki's deck browser shows
+// them (from AnkiConnect's getDeckStats — not a raw card search).
 export interface AnkiDeckSummary {
   name: string;
-  dueCount: number;
+  newCount: number;
+  learnCount: number;
+  reviewCount: number;
 }
 
 export interface ChatMessage {

@@ -1,12 +1,13 @@
 // The command agent: a Gemini function-calling loop whose tools are
-// AnkiConnect actions. The user gives natural-language commands; the agent
-// operates directly on the Anki collection (the source of truth) and can
-// also command this app (e.g. launch a review session).
+// AnkiConnect actions — including the GUI driver, so the agent can literally
+// SEE what Anki Desktop's reviewer is showing (getCurrentCard) and CLICK its
+// real buttons (showAnswer / answerCurrentCard / undo). The user gives
+// natural-language commands; Anki is the source of truth.
 //
 // Uses the Gemini REST API directly — the user's API key comes from
 // Settings and is stored only on-device.
 
-import { ankiConnectService } from './ankiConnectService';
+import { ankiConnectService, stripHtml } from './ankiConnectService';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const AGENT_MODEL = 'gemini-2.5-flash';
@@ -32,17 +33,26 @@ interface GeminiContent {
   parts: GeminiPart[];
 }
 
+// Grounded in the Anki source and the FSRS docs: ratings are 1=Again, 2=Hard,
+// 3=Good, 4=Easy; FSRS treats Again as the only failing grade; intervals are
+// fuzzed ±~5% so they are not deterministic; never manipulate intervals or
+// ease directly — always rate through the scheduler.
 const SYSTEM_INSTRUCTION =
-  `You are Echo, a voice-friendly command agent for the user's Anki flashcard collection. ` +
-  `Anki Desktop is the single source of truth — you operate on it directly through your tools. ` +
-  `Keep replies short and speakable (1-3 sentences). When asked to create flashcards, write the ` +
-  `content yourself and add it with addFlashcards; use HTML sparingly (plain text preferred). ` +
-  `When the user wants to study, call startReview. Never invent deck names — check listDecks first if unsure.`;
+  `You are Echo, a voice-friendly real-time command agent for the user's Anki collection. ` +
+  `Anki Desktop is the single source of truth — you operate on it directly through your tools, ` +
+  `including seeing Anki's reviewer screen (getCurrentCard) and clicking its buttons ` +
+  `(showAnswer, answerCurrentCard, undo). Keep replies short and speakable (1-3 sentences). ` +
+  `Rating rules (FSRS): 1=Again is the ONLY failing grade; 2=Hard means recalled with much ` +
+  `hesitation (a PASS — never use Hard when the user forgot); 3=Good is normal; 4=Easy was effortless. ` +
+  `When the user says they forgot, rate Again. Never invent deck names — check listDecks first if unsure. ` +
+  `When asked to create flashcards, write the content yourself and add it with addFlashcards (plain text preferred). ` +
+  `When the user wants to study on their phone, call startReview; to drive the desktop reviewer directly, ` +
+  `use openDeckReview + getCurrentCard + showAnswer + answerCurrentCard.`;
 
 const TOOL_DECLARATIONS = [
   {
     name: 'listDecks',
-    description: 'Lists all deck names in the Anki collection with their due-card counts.',
+    description: 'Lists every deck with scheduler-accurate counts of new, learning, and review cards currently queued.',
     parameters: { type: 'OBJECT', properties: {} },
   },
   {
@@ -78,8 +88,8 @@ const TOOL_DECLARATIONS = [
     },
   },
   {
-    name: 'countDueCards',
-    description: 'Returns how many cards are currently due in a deck.',
+    name: 'openDeckReview',
+    description: "Opens Anki Desktop's real reviewer window for a deck. Anki's own scheduler picks the cards (daily limits, new/review mix, burying).",
     parameters: {
       type: 'OBJECT',
       properties: { deckName: { type: 'STRING', description: 'Exact Anki deck name.' } },
@@ -87,8 +97,32 @@ const TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'getCurrentCard',
+    description: "Sees what Anki's reviewer is showing right now: the current card's question, answer, and the rating buttons with their next-interval labels. Returns notActive if no review is open.",
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'showAnswer',
+    description: "Clicks 'Show Answer' in Anki's reviewer, flipping the current card.",
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'answerCurrentCard',
+    description: "Clicks a rating button on the card currently shown in Anki's reviewer. 1=Again (fail), 2=Hard, 3=Good, 4=Easy.",
+    parameters: {
+      type: 'OBJECT',
+      properties: { ease: { type: 'NUMBER', description: 'Rating: 1, 2, 3, or 4.' } },
+      required: ['ease'],
+    },
+  },
+  {
+    name: 'undo',
+    description: "Undoes the last action in Anki (like pressing Ctrl+Z there), e.g. an accidental rating.",
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
     name: 'startReview',
-    description: "Opens this app's review screen for a deck so the user can study its due cards now.",
+    description: "Opens THIS phone app's review screen for a deck (which mirrors and drives Anki's reviewer) so the user can study from the phone.",
     parameters: {
       type: 'OBJECT',
       properties: { deckName: { type: 'STRING', description: 'Exact Anki deck name to review.' } },
@@ -106,8 +140,12 @@ async function executeTool(host: string, call: FunctionCall, appActions: AgentAp
   try {
     switch (call.name) {
       case 'listDecks': {
-        const summaries = await ankiConnectService.getDeckSummaries(host);
-        return { decks: summaries };
+        const stats = await ankiConnectService.getDeckStats(host);
+        return {
+          decks: stats.map(d => ({
+            name: d.name, new: d.newCount, learning: d.learnCount, review: d.reviewCount, total: d.totalInDeck,
+          })),
+        };
       }
       case 'createDeck': {
         await ankiConnectService.createDeck(host, String(call.args.deckName));
@@ -118,13 +156,38 @@ async function executeTool(host: string, call: FunctionCall, appActions: AgentAp
         const added = await ankiConnectService.addNotes(host, String(call.args.deckName), cards);
         return { added, requested: cards.length, skippedAsDuplicates: cards.length - added };
       }
-      case 'countDueCards': {
-        const due = await ankiConnectService.countDueCards(host, String(call.args.deckName));
-        return { deckName: call.args.deckName, due };
+      case 'openDeckReview': {
+        const ok = await ankiConnectService.guiDeckReview(host, String(call.args.deckName));
+        return { ok };
+      }
+      case 'getCurrentCard': {
+        const card = await ankiConnectService.guiCurrentCard(host);
+        if (!card) return { notActive: true, note: 'No review is open in Anki right now (or the deck is finished).' };
+        return {
+          deckName: card.deckName,
+          question: stripHtml(card.question),
+          answer: stripHtml(card.answer),
+          buttons: card.buttons,
+          nextIntervals: card.nextReviews,
+        };
+      }
+      case 'showAnswer': {
+        const ok = await ankiConnectService.guiShowAnswer(host);
+        return { ok };
+      }
+      case 'answerCurrentCard': {
+        const ease = Number(call.args.ease);
+        if (![1, 2, 3, 4].includes(ease)) return { error: 'ease must be 1, 2, 3, or 4' };
+        const ok = await ankiConnectService.guiAnswerCard(host, ease as 1 | 2 | 3 | 4);
+        return { ok };
+      }
+      case 'undo': {
+        const ok = await ankiConnectService.guiUndo(host);
+        return { ok };
       }
       case 'startReview': {
         appActions.startReview(String(call.args.deckName));
-        return { ok: true, note: 'Review screen opened in the app.' };
+        return { ok: true, note: 'Review screen opened in the app (mirrors the Anki reviewer).' };
       }
       case 'syncAnkiWeb': {
         await ankiConnectService.sync(host);

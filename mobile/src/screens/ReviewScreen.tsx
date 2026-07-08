@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import * as Speech from 'expo-speech';
-import { AnkiReviewCard, AppSettings } from '../types';
-import { ankiConnectService } from '../services/ankiConnectService';
+import { AppSettings } from '../types';
+import { ankiConnectService, AnkiCurrentCard, stripHtml } from '../services/ankiConnectService';
 import { colors } from '../theme';
 
-// Reviews run DIRECTLY against Anki: the due queue is fetched live and every
-// rating is applied through Anki's own scheduler (answerCards). This app
-// stores nothing.
+// This screen is a live MIRROR of Anki Desktop's reviewer window. Opening it
+// starts a real review in Anki (guiDeckReview); every "Show Answer" and
+// rating tap here clicks the corresponding button in the Anki window
+// (guiShowAnswer / guiAnswerCard). Anki's own v3 queue decides card order —
+// daily limits, new cards, sibling burying and all.
 
 interface ReviewScreenProps {
   deckName: string;
@@ -23,12 +25,13 @@ const RATINGS: { ease: 1 | 2 | 3 | 4; label: string; color: string }[] = [
 ];
 
 const ReviewScreen: React.FC<ReviewScreenProps> = ({ deckName, settings, onDone }) => {
-  const [queue, setQueue] = useState<AnkiReviewCard[] | null>(null);
-  const [showAnswer, setShowAnswer] = useState(false);
+  const [card, setCard] = useState<AnkiCurrentCard | null>(null);
+  const [phase, setPhase] = useState<'loading' | 'question' | 'answer' | 'finished' | 'error'>('loading');
   const [reviewed, setReviewed] = useState(0);
   const [error, setError] = useState('');
+  const lastSpokenCardId = useRef<number | null>(null);
 
-  const currentCard = queue?.[0] ?? null;
+  const host = settings.ankiConnectHost;
 
   const speak = useCallback((text: string) => {
     if (!settings.speakCards) return;
@@ -36,47 +39,83 @@ const ReviewScreen: React.FC<ReviewScreenProps> = ({ deckName, settings, onDone 
     Speech.speak(text, { language: 'en-US' });
   }, [settings.speakCards]);
 
+  // Pull whatever Anki's reviewer is showing right now.
+  const readScreen = useCallback(async (): Promise<AnkiCurrentCard | null> => {
+    const current = await ankiConnectService.guiCurrentCard(host);
+    setCard(current);
+    if (!current) setPhase('finished');
+    return current;
+  }, [host]);
+
   useEffect(() => {
-    ankiConnectService.getDueCards(settings.ankiConnectHost, deckName)
-      .then(setQueue)
-      .catch(() => setError('Could not load due cards from Anki. Is Anki Desktop still running?'));
+    (async () => {
+      try {
+        const opened = await ankiConnectService.guiDeckReview(host, deckName);
+        if (!opened) throw new Error('could not open reviewer');
+        const current = await readScreen();
+        if (current) setPhase('question');
+      } catch {
+        setError('Could not start a review in Anki. Is Anki Desktop still running?');
+        setPhase('error');
+      }
+    })();
     return () => { Speech.stop(); };
-  }, [deckName, settings.ankiConnectHost]);
+  }, [deckName, host, readScreen]);
 
-  // Read each card point-by-point: question when it appears, answer on reveal.
+  // Speak each question once as it appears.
   useEffect(() => {
-    if (currentCard && !showAnswer) speak(currentCard.question);
-  }, [currentCard, showAnswer, speak]);
+    if (card && phase === 'question' && lastSpokenCardId.current !== card.cardId) {
+      lastSpokenCardId.current = card.cardId;
+      speak(stripHtml(card.question));
+    }
+  }, [card, phase, speak]);
 
-  const handleReveal = () => {
-    if (!currentCard) return;
-    setShowAnswer(true);
-    speak(`${currentCard.answer}. How did you do? Rate Again, Hard, Good, or Easy.`);
+  const handleReveal = async () => {
+    if (!card) return;
+    try {
+      await ankiConnectService.guiShowAnswer(host); // flips the card in Anki too
+      const current = await readScreen();
+      if (current) {
+        setPhase('answer');
+        const q = stripHtml(current.question);
+        const full = stripHtml(current.answer);
+        const backOnly = full.startsWith(q) ? full.slice(q.length).trim() : full;
+        speak(`${backOnly}. How did you do?`);
+      }
+    } catch {
+      setError('Lost connection to Anki.');
+    }
   };
 
   const handleRate = async (ease: 1 | 2 | 3 | 4) => {
-    if (!currentCard || !queue) return;
+    if (!card) return;
     try {
-      await ankiConnectService.answerCard(settings.ankiConnectHost, currentCard.cardId, ease);
+      await ankiConnectService.guiAnswerCard(host, ease); // clicks the real button
     } catch {
-      setError('Rating failed — lost connection to Anki. The card stays in the queue.');
+      setError('Rating failed — lost connection to Anki. The card stays on screen.');
       return;
     }
     setError('');
-    setShowAnswer(false);
     setReviewed(r => r + 1);
-    const remaining = queue.slice(1);
-    setQueue(remaining);
-    if (remaining.length === 0) {
-      speak('Review complete! Well done.');
+    const next = await readScreen();
+    if (next) {
+      setPhase('question');
+    } else {
+      speak('Deck finished! Well done.');
     }
   };
 
-  if (queue === null && !error) {
+  const answerText = card ? (() => {
+    const q = stripHtml(card.question);
+    const full = stripHtml(card.answer);
+    return full.startsWith(q) ? full.slice(q.length).trim() : full;
+  })() : '';
+
+  if (phase === 'loading') {
     return <View style={styles.center}><ActivityIndicator color={colors.accent} size="large" /></View>;
   }
 
-  if (error && !currentCard) {
+  if (phase === 'error') {
     return (
       <View style={styles.center}>
         <Text style={styles.doneTitle}>Connection problem</Text>
@@ -88,14 +127,14 @@ const ReviewScreen: React.FC<ReviewScreenProps> = ({ deckName, settings, onDone 
     );
   }
 
-  if (!currentCard) {
+  if (phase === 'finished' || !card) {
     return (
       <View style={styles.center}>
-        <Text style={styles.doneTitle}>{reviewed > 0 ? 'Review complete! 🎉' : 'No cards due'}</Text>
+        <Text style={styles.doneTitle}>{reviewed > 0 ? 'Deck finished! 🎉' : 'Nothing to review'}</Text>
         <Text style={styles.doneMeta}>
           {reviewed > 0
-            ? `You reviewed ${reviewed} card${reviewed === 1 ? '' : 's'} in "${deckName}" — all recorded in Anki.`
-            : `"${deckName}" has no cards due right now.`}
+            ? `You reviewed ${reviewed} card${reviewed === 1 ? '' : 's'} in "${deckName}" — all done in Anki itself.`
+            : `Anki has no cards queued in "${deckName}" right now (daily limits may be reached).`}
         </Text>
         <TouchableOpacity style={[styles.button, { backgroundColor: colors.primary, marginTop: 24 }]} onPress={onDone}>
           <Text style={styles.buttonText}>Back to decks</Text>
@@ -106,16 +145,16 @@ const ReviewScreen: React.FC<ReviewScreenProps> = ({ deckName, settings, onDone 
 
   return (
     <View style={styles.container}>
-      <Text style={styles.progress}>{deckName} · {queue?.length ?? 0} due</Text>
+      <Text style={styles.progress}>🖥 Mirroring Anki · {deckName} · {reviewed} done</Text>
       <ScrollView style={styles.cardArea} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
         <View style={styles.card}>
           <Text style={styles.cardLabel}>QUESTION</Text>
-          <Text style={styles.cardText}>{currentCard.question}</Text>
-          {showAnswer && (
+          <Text style={styles.cardText}>{stripHtml(card.question)}</Text>
+          {phase === 'answer' && (
             <>
               <View style={styles.divider} />
               <Text style={styles.cardLabel}>ANSWER</Text>
-              <Text style={styles.cardText}>{currentCard.answer}</Text>
+              <Text style={styles.cardText}>{answerText}</Text>
             </>
           )}
         </View>
@@ -123,15 +162,16 @@ const ReviewScreen: React.FC<ReviewScreenProps> = ({ deckName, settings, onDone 
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {!showAnswer ? (
+      {phase === 'question' ? (
         <TouchableOpacity style={[styles.button, { backgroundColor: colors.primary }]} onPress={handleReveal}>
           <Text style={styles.buttonText}>Show Answer</Text>
         </TouchableOpacity>
       ) : (
         <View style={styles.ratingRow}>
-          {RATINGS.map(({ ease, label, color }) => (
+          {RATINGS.map(({ ease, label, color }, i) => (
             <TouchableOpacity key={label} style={[styles.ratingButton, { backgroundColor: color }]} onPress={() => handleRate(ease)}>
               <Text style={styles.buttonText}>{label}</Text>
+              {card.nextReviews[i] ? <Text style={styles.nextReview}>{card.nextReviews[i]}</Text> : null}
             </TouchableOpacity>
           ))}
         </View>
@@ -156,7 +196,8 @@ const styles = StyleSheet.create({
   button: { padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 16 },
   buttonText: { color: colors.text, fontWeight: '700' },
   ratingRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
-  ratingButton: { flex: 1, padding: 14, borderRadius: 10, alignItems: 'center' },
+  ratingButton: { flex: 1, padding: 12, borderRadius: 10, alignItems: 'center' },
+  nextReview: { color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 2 },
   doneTitle: { color: colors.text, fontSize: 26, fontWeight: 'bold' },
   doneMeta: { color: colors.textMuted, marginTop: 8, textAlign: 'center' },
   error: { color: '#f87171', textAlign: 'center', marginTop: 8 },

@@ -4,14 +4,20 @@ A React Native (Expo SDK 57) companion app for Anki. **Anki Desktop is the singl
 
 ## What it does
 
-- **Live deck dashboard** — deck names and due counts stream straight from Anki; pull to refresh.
-- **Review from your phone** — due cards are fetched live, read aloud point-by-point (`expo-speech`), and every Again/Hard/Good/Easy rating is applied through **Anki's own scheduler** (`answerCards`). Nothing is duplicated or re-scheduled locally.
-- **Echo Agent** — a Gemini-powered command agent (`gemini-2.5-flash` function calling) with tools that operate directly on Anki:
-  - `listDecks` / `countDueCards` — inspect the collection
-  - `createDeck` / `addFlashcards` — the agent writes card content and inserts it straight into Anki
-  - `startReview` — the agent can command this app to open a review session
+- **Live deck dashboard** — scheduler-accurate new/learning/review counts per deck via `getDeckStats` (the same numbers Anki's deck browser shows); pull to refresh.
+- **Review = remote-controlling Anki's real reviewer.** Opening a review here runs `guiDeckReview` in Anki Desktop; the phone mirrors what's on the Anki screen (`guiCurrentCard`, including the real next-interval labels on each button) and every tap clicks the actual button in the Anki window (`guiShowAnswer` / `guiAnswerCard`). Cards are read aloud point-by-point (`expo-speech`).
+- **Echo Agent** — a Gemini-powered command agent (`gemini-2.5-flash` function calling) that can *see the Anki screen and click its buttons*:
+  - `getCurrentCard` / `showAnswer` / `answerCurrentCard` / `undo` — drive the desktop reviewer directly
+  - `listDecks` (with queue counts) / `createDeck` / `addFlashcards` — the agent writes card content and inserts it straight into Anki
+  - `openDeckReview` / `startReview` — open a review in Anki, or in this app
   - `syncAnkiWeb` — trigger Anki's own cloud sync
-  Say things like *"create 10 cards about the Krebs cycle in my Biology deck"* or *"what's due today?"*. Replies are spoken aloud.
+  Say things like *"create 10 cards about the Krebs cycle in my Biology deck"*, *"what's on the screen?"*, or *"I forgot that one — rate it"*. Replies are spoken aloud.
+
+### Why GUI-driven (accuracy notes, verified against the Anki source)
+
+- A raw `findCards "is:due"` queue is **wrong**: `is:due` excludes new cards (`rslib/src/search/sqlwriter.rs`), and a raw search ignores daily limits, sibling burying, and the v3 scheduler's gather/interleave order (`rslib/src/scheduler/queue/builder/`). Only Anki's own reviewer yields the true next-card sequence — so we drive it.
+- Ratings are `1=Again, 2=Hard, 3=Good, 4=Easy`, exactly as in `qt/aqt/reviewer.py::_answerCard` and the scheduler's `Rating::as_number()`. All four are always available under the v3 scheduler.
+- With native FSRS (Anki 23.10+), **Again is the only failing grade** — the agent is instructed to never use Hard as a fail substitute, never to touch intervals/ease directly, and to treat intervals as non-deterministic (±~5% fuzz).
 
 Your Gemini API key is entered in Settings and stored only on-device — it is never baked into the binary.
 

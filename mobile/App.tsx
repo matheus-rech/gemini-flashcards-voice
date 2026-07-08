@@ -40,7 +40,10 @@ export default function App() {
       return;
     }
     try {
-      setDecks(await ankiConnectService.getDeckSummaries(host));
+      const stats = await ankiConnectService.getDeckStats(host);
+      setDecks(stats.map(d => ({
+        name: d.name, newCount: d.newCount, learnCount: d.learnCount, reviewCount: d.reviewCount,
+      })));
       setConnection('connected');
     } catch {
       setConnection('unreachable');
