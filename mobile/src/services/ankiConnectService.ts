@@ -2,11 +2,16 @@
 // exposes a JSON-RPC-style HTTP API — by default on port 8765 of the machine
 // running Anki Desktop.
 //
+// Anki is the SOURCE OF TRUTH: this app never keeps its own copy of decks,
+// cards, or scheduling state. Reviews pull due cards straight from Anki and
+// ratings are applied through Anki's own scheduler via `answerCards`.
+//
 // On a phone, "localhost" is the phone itself, so the host must be the LAN
 // address of the computer running Anki (e.g. http://192.168.1.20:8765) and
 // AnkiConnect's config must allow LAN connections:
 //   "webBindAddress": "0.0.0.0", "webCorsOriginList": ["*"]
-// The host is user-configurable in the Settings screen.
+
+import { AnkiReviewCard } from '../types';
 
 const ANKI_CONNECT_VERSION = 6;
 
@@ -15,23 +20,14 @@ interface AnkiConnectResponse<T> {
   error: string | null;
 }
 
-export interface AnkiNoteInfo {
-  noteId: number;
-  modelName: string;
-  tags: string[];
-  fields: Record<string, { value: string; order: number }>;
-  cards: number[];
-}
-
 export interface AnkiCardInfo {
   cardId: number;
-  note: number; // parent note id
+  note: number;
   deckName: string;
+  question: string; // rendered front HTML
+  answer: string;   // rendered back HTML
   fields: Record<string, { value: string; order: number }>;
 }
-
-// [reviewTime, cardId, usn, ease, interval, lastInterval, factor, timeTaken, reviewType]
-export type AnkiReviewTuple = [number, number, number, number, number, number, number, number, number];
 
 async function invoke<T = unknown>(host: string, action: string, params: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(host, {
@@ -46,6 +42,24 @@ async function invoke<T = unknown>(host: string, action: string, params: Record<
     throw new Error(`AnkiConnect error: ${data.error}`);
   }
   return data.result;
+}
+
+// Rendered Anki cards are HTML; flatten to speakable/displayable plain text.
+export function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|p|li|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export const ankiConnectService = {
@@ -73,45 +87,66 @@ export const ankiConnectService = {
     return invoke<string[]>(host, 'deckNames');
   },
 
-  findNotes: async (host: string, ankiDeckName: string): Promise<number[]> => {
-    return invoke<number[]>(host, 'findNotes', { query: `deck:"${ankiDeckName}"` });
+  createDeck: async (host: string, deckName: string): Promise<number> => {
+    return invoke<number>(host, 'createDeck', { deck: deckName });
   },
 
-  notesInfo: async (host: string, noteIds: number[]): Promise<AnkiNoteInfo[]> => {
-    return invoke<AnkiNoteInfo[]>(host, 'notesInfo', { notes: noteIds });
+  countDueCards: async (host: string, ankiDeckName: string): Promise<number> => {
+    const ids = await invoke<number[]>(host, 'findCards', { query: `deck:"${ankiDeckName}" is:due` });
+    return ids.length;
   },
 
-  findCards: async (host: string, ankiDeckName: string): Promise<number[]> => {
-    return invoke<number[]>(host, 'findCards', { query: `deck:"${ankiDeckName}"` });
+  // Pull the current due queue for a deck, rendered and stripped to plain
+  // text, capped to keep payloads sane on mobile.
+  getDueCards: async (host: string, ankiDeckName: string, limit = 100): Promise<AnkiReviewCard[]> => {
+    const ids = await invoke<number[]>(host, 'findCards', { query: `deck:"${ankiDeckName}" is:due` });
+    if (ids.length === 0) return [];
+    const info = await invoke<AnkiCardInfo[]>(host, 'cardsInfo', { cards: ids.slice(0, limit) });
+    return info.map(ci => {
+      const q = stripHtml(ci.question);
+      // Anki's rendered answer usually contains the question above a divider;
+      // drop the leading question text if present so we speak only the back.
+      const fullAnswer = stripHtml(ci.answer);
+      const answer = fullAnswer.startsWith(q) ? fullAnswer.slice(q.length).trim() : fullAnswer;
+      return { cardId: ci.cardId, question: q, answer };
+    });
   },
 
-  cardsInfo: async (host: string, cardIds: number[]): Promise<AnkiCardInfo[]> => {
-    return invoke<AnkiCardInfo[]>(host, 'cardsInfo', { cards: cardIds });
-  },
-
-  // PUSH path: replays one rating through Anki's own scheduler.
-  answerCard: async (host: string, ankiCardId: number, ease: 1 | 2 | 3 | 4): Promise<boolean> => {
+  // Applies one rating through Anki's own scheduler — identical to clicking
+  // Again/Hard/Good/Easy in Anki's reviewer. Anki decides the next due date.
+  answerCard: async (host: string, cardId: number, ease: 1 | 2 | 3 | 4): Promise<boolean> => {
     const results = await invoke<boolean[]>(host, 'answerCards', {
-      answers: [{ cardId: ankiCardId, ease }],
+      answers: [{ cardId, ease }],
     });
     return results[0] ?? false;
   },
 
-  // PULL path: review-log entries for a deck since startTimeMs (exclusive).
-  cardReviewsSince: async (host: string, ankiDeckName: string, startTimeMs: number): Promise<AnkiReviewTuple[]> => {
-    return invoke<AnkiReviewTuple[]>(host, 'cardReviews', { deck: ankiDeckName, startID: startTimeMs });
+  // Adds notes (Basic model) directly into an Anki deck. Returns the number
+  // successfully added (nulls = rejected duplicates).
+  addNotes: async (host: string, deckName: string, cards: { front: string; back: string }[]): Promise<number> => {
+    const results = await invoke<(number | null)[]>(host, 'addNotes', {
+      notes: cards.map(c => ({
+        deckName,
+        modelName: 'Basic',
+        fields: { Front: c.front, Back: c.back },
+        options: { allowDuplicate: false },
+      })),
+    });
+    return results.filter(r => r !== null).length;
+  },
+
+  // Per-deck due summary for the home screen and the agent.
+  getDeckSummaries: async (host: string): Promise<{ name: string; dueCount: number }[]> => {
+    const names = await invoke<string[]>(host, 'deckNames');
+    const summaries = await Promise.all(names.map(async name => ({
+      name,
+      dueCount: await ankiConnectService.countDueCards(host, name).catch(() => 0),
+    })));
+    return summaries;
+  },
+
+  // Triggers a collection sync with AnkiWeb on the desktop app.
+  sync: async (host: string): Promise<void> => {
+    await invoke<null>(host, 'sync');
   },
 };
-
-// Best-effort positional field mapping (Basic / Basic-and-reversed note
-// types). Cloze notes won't map cleanly — callers skip empty question/answer.
-export function mapAnkiNoteToCard(note: AnkiNoteInfo): { question: string; answer: string; explanation?: string } {
-  const values = Object.values(note.fields)
-    .sort((a, b) => a.order - b.order)
-    .map(f => f.value);
-  return {
-    question: values[0] ?? '',
-    answer: values[1] ?? '',
-    explanation: values[2] || undefined,
-  };
-}

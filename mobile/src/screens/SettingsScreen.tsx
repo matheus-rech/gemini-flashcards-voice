@@ -19,7 +19,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onSave, onCan
       <Text style={styles.title}>Settings</Text>
 
       <Text style={styles.label}>Gemini API key</Text>
-      <Text style={styles.hint}>Used for AI deck generation and explanations. Get one at ai.google.dev. Stored only on this device.</Text>
+      <Text style={styles.hint}>Powers the Echo command agent. Get one at ai.google.dev. Stored only on this device.</Text>
       <TextInput
         style={styles.input}
         value={geminiApiKey}
@@ -49,8 +49,8 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ settings, onSave, onCan
 
       <View style={styles.switchRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Read cards aloud</Text>
-          <Text style={styles.hint}>Speaks each question and answer point-by-point during review.</Text>
+          <Text style={styles.label}>Speak aloud</Text>
+          <Text style={styles.hint}>Reads questions and answers point-by-point during review, and speaks the agent's replies.</Text>
         </View>
         <Switch value={speakCards} onValueChange={setSpeakCards} trackColor={{ true: colors.accent }} />
       </View>

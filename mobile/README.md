@@ -1,14 +1,19 @@
-# EchoCards Mobile (Expo)
+# EchoCards Command Center (Expo)
 
-A React Native (Expo SDK 57) port of the EchoCards voice-powered flashcard app.
+A React Native (Expo SDK 57) companion app for Anki. **Anki Desktop is the single source of truth** — this app stores no decks, cards, or scheduling data of its own (only settings). It is a remote control and agent hub for your real Anki collection, connected over [AnkiConnect](https://foosoft.net/projects/anki-connect/).
 
-## Features
+## What it does
 
-- **FSRS-4.5 spaced repetition** — the exact same scheduler as the web app (`src/services/fsrs.ts` is a direct port).
-- **Spoken reviews** — each question and answer is read aloud point-by-point with the device's text-to-speech (`expo-speech`); toggle in Settings.
-- **AI deck generation** — create a full deck from any topic via the Gemini API (`gemini-2.5-pro`). Your API key is entered in Settings and stored only on-device.
-- **AI explanations** — during review, ask for a deeper explanation of the current card.
-- **Anki sync** — import decks from Anki Desktop via AnkiConnect and keep review progress in sync both ways (ratings replay through each system's own scheduler; internal scheduling data is never touched).
+- **Live deck dashboard** — deck names and due counts stream straight from Anki; pull to refresh.
+- **Review from your phone** — due cards are fetched live, read aloud point-by-point (`expo-speech`), and every Again/Hard/Good/Easy rating is applied through **Anki's own scheduler** (`answerCards`). Nothing is duplicated or re-scheduled locally.
+- **Echo Agent** — a Gemini-powered command agent (`gemini-2.5-flash` function calling) with tools that operate directly on Anki:
+  - `listDecks` / `countDueCards` — inspect the collection
+  - `createDeck` / `addFlashcards` — the agent writes card content and inserts it straight into Anki
+  - `startReview` — the agent can command this app to open a review session
+  - `syncAnkiWeb` — trigger Anki's own cloud sync
+  Say things like *"create 10 cards about the Krebs cycle in my Biology deck"* or *"what's due today?"*. Replies are spoken aloud.
+
+Your Gemini API key is entered in Settings and stored only on-device — it is never baked into the binary.
 
 ## Running locally
 
@@ -25,7 +30,7 @@ Every push builds one in CI: see the **Mobile app (typecheck + Android APK)** jo
 
 iOS builds require a macOS runner or EAS Build with Apple credentials — not wired up in CI.
 
-## Anki sync from a phone
+## Connecting to Anki from a phone
 
 Your phone can't reach `localhost` on your computer. In **Settings → AnkiConnect host**, enter your computer's LAN address, e.g. `http://192.168.1.20:8765`, and configure the AnkiConnect add-on (Tools → Add-ons → AnkiConnect → Config) to accept LAN connections:
 
@@ -36,4 +41,4 @@ Your phone can't reach `localhost` on your computer. In **Settings → AnkiConne
 }
 ```
 
-Restart Anki after changing the config, keep it running, and approve the permission popup on first connect. Both devices must be on the same network. See also `../ANKI_SETUP.md` for what syncs and known limitations (Basic note types only; the two schedulers' due dates diverge by design).
+Restart Anki after changing the config, keep it running, and approve the permission popup in Anki Desktop on first connect. Both devices must be on the same network.

@@ -1,42 +1,6 @@
-export enum Rating {
-  AGAIN = 1,
-  HARD = 2,
-  GOOD = 3,
-  EASY = 4,
-}
-
-export interface Card {
-  id: string;
-  deckId: string;
-  question: string;
-  answer: string;
-  explanation?: string;
-  // FSRS properties
-  dueDate: Date;
-  stability: number;
-  difficulty: number;
-  lapses: number;
-  reps: number;
-  state: 'NEW' | 'LEARNING' | 'REVIEW' | 'RELEARNING';
-  // Anki linkage (only present for cards imported from / linked to Anki)
-  ankiNoteId?: number;
-  ankiCardId?: number;
-}
-
-export interface Deck {
-  id: string;
-  name: string;
-  // Anki linkage (only present for decks linked to an Anki deck)
-  ankiDeckName?: string;
-}
-
-// Tracks the last native-Anki review (by epoch ms) already replayed into
-// each linked deck, so a pull-sync never re-applies the same review twice.
-export interface AnkiSyncMeta {
-  [deckId: string]: {
-    lastSyncedReviewTime: number;
-  };
-}
+// EchoCards Command Center types.
+// Anki Desktop is the single source of truth for all decks, cards, and
+// scheduling — this app holds no card data of its own, only settings.
 
 export interface AppSettings {
   geminiApiKey: string;
@@ -51,3 +15,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ankiConnectHost: 'http://localhost:8765',
   speakCards: true,
 };
+
+// A due card pulled live from Anki for a review session. `question`/`answer`
+// are plain text stripped from Anki's rendered HTML.
+export interface AnkiReviewCard {
+  cardId: number;
+  question: string;
+  answer: string;
+}
+
+export interface AnkiDeckSummary {
+  name: string;
+  dueCount: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'agent';
+  text: string;
+}
