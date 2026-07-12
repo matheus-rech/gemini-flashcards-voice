@@ -7,6 +7,7 @@ import { calculateNextReview } from './services/fsrs';
 import { geminiService } from './services/geminiService';
 import { knowledgeBaseService } from './services/knowledgeBaseService';
 import { ankiConnectService, mapAnkiNoteToCard } from './services/ankiConnectService';
+import { importAnkiDeck } from './services/ankiService';
 import CardView from './components/CardView';
 import StatusIndicator from './components/StatusIndicator';
 import TranscriptView from './components/TranscriptView';
@@ -632,6 +633,30 @@ const App: React.FC = () => {
     }
   }, [decks, playTts]);
 
+  const handleImportAnki = useCallback(async (file: File) => {
+    try {
+      setStatusText('Importing Anki deck...');
+      const result = await importAnkiDeck(file);
+
+      setDecks(storageService.getDecks()); // Refresh deck list
+      setSessionState(SessionState.AWAITING_COMMAND);
+
+      let text = `Great! The "${result.deck.name}" deck has been imported successfully with ${result.cardsImported} cards.`;
+
+      if (result.errors.length > 0) {
+        text += ` There were ${result.errors.length} warnings during import.`;
+        console.warn('Anki import warnings:', result.errors);
+      }
+
+      setStatusText(text);
+      playTts(text);
+    } catch (error) {
+      const errorText = `Sorry, I couldn't import the Anki deck. ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setStatusText(errorText);
+      playTts(errorText);
+      setSessionState(SessionState.AWAITING_COMMAND);
+    }
+  }, [playTts]);
 
   const processAndSaveGeneratedCards = useCallback((deckName: string, generatedCards: {question: string, answer: string, explanation?: string}[]) => {
      if (generatedCards && generatedCards.length > 0) {
@@ -1028,7 +1053,7 @@ const App: React.FC = () => {
       case SessionState.SHOWING_DECKS:
         return <DeckListView decks={decks} onStartReview={handleStartReview} onShowImport={handleShowImportView} onShowSmartGeneration={handleShowSmartGenerationView} onStrengthenWeakness={handleGenerateCardsFromWeakness} onShowImageGeneration={handleShowImageGenerationView} onShowImageAnalysis={handleShowImageAnalysisView} onShowTranscription={handleShowTranscriptionView} onShowTextAnalysis={handleShowTextAnalysisView} onShowAnkiImport={handleShowAnkiImportView} onSyncAnki={handleSyncAnkiDeck} />;
       case SessionState.IMPORTING_DECK:
-        return <ImportDeckView onImport={handleImportDeck} onCancel={handleGoBack} />;
+        return <ImportDeckView onImport={handleImportDeck} onImportAnki={handleImportAnki} onCancel={handleGoBack} />;
       case SessionState.ANKI_IMPORT:
         return <AnkiImportView
           isLoading={isAnkiLoading}
