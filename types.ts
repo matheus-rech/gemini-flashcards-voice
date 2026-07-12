@@ -18,11 +18,16 @@ export interface Card {
   lapses: number;
   reps: number;
   state: 'NEW' | 'LEARNING' | 'REVIEW' | 'RELEARNING';
+  // Anki linkage (only present for cards imported from / linked to Anki)
+  ankiNoteId?: number;
+  ankiCardId?: number;
 }
 
 export interface Deck {
   id: string;
   name: string;
+  // Anki linkage (only present for decks linked to an Anki deck)
+  ankiDeckName?: string;
 }
 
 export enum SessionState {
@@ -43,6 +48,8 @@ export enum SessionState {
   TRANSCRIBING_AUDIO = "TRANSCRIBING_AUDIO",
   SMART_GENERATION = "SMART_GENERATION",
   ANALYZING_TEXT = "ANALYZING_TEXT",
+  ANKI_IMPORT = "ANKI_IMPORT",
+  ANKI_SYNCING = "ANKI_SYNCING",
   ERROR = "ERROR",
 }
 
@@ -60,6 +67,14 @@ export interface StudyProgress {
   goal: StudyGoal;
   progress: number;
   date: string; // YYYY-MM-DD
+}
+
+// Tracks the last native-Anki review (by epoch ms) already replayed into
+// each linked deck, so a pull-sync never re-applies the same review twice.
+export interface AnkiSyncMeta {
+  [deckId: string]: {
+    lastSyncedReviewTime: number;
+  };
 }
 
 export enum AudioPlaybackState {
