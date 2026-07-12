@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web:
+    name: Web app (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          # Dummy key so the Vite define doesn't inject `undefined`; the real
+          # key is provided by end users at runtime via .env.local.
+          GEMINI_API_KEY: ci-placeholder
+
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocards-web-dist
+          path: dist/
+          retention-days: 30
+
+  android-apk:
+    name: Mobile app (typecheck + Android APK)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
+        working-directory: mobile/android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocards-android-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  ios-ipa:
+    name: Mobile app (iOS unsigned IPA, sideloadable)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          CI: 1
+
+      - name: Install CocoaPods dependencies
+        run: pod install
+        working-directory: mobile/ios
+
+      - name: Build unsigned Release app
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls ios/*.xcworkspace -d | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP_PATH=$(ls -d ios/build/Build/Products/Release-iphoneos/*.app | head -1)
+          mkdir -p ipa/Payload
+          cp -R "$APP_PATH" ipa/Payload/
+          cd ipa && zip -qry EchoCards-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocards-ios-unsigned-ipa
+          path: mobile/ipa/EchoCards-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

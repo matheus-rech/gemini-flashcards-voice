@@ -169,6 +169,22 @@ const controlFunctions: FunctionDeclaration[] = [
     parameters: { type: Type.OBJECT, properties: {} },
   },
   {
+    name: 'showAnkiImportView',
+    description: "Shows the view for browsing the user's local Anki Desktop decks and linking/importing one into EchoCards. Requires Anki Desktop to be running locally with the AnkiConnect add-on installed.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: 'syncAnkiDeck',
+    description: "Synchronizes a previously Anki-linked deck: pulls any reviews done natively in Anki Desktop since the last sync and replays them into EchoCards' own scheduler. Requires Anki Desktop to be running locally.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        deckName: { type: Type.STRING, description: 'The name of the EchoCards deck to sync with Anki (must already be linked to an Anki deck).' },
+      },
+      required: ['deckName'],
+    },
+  },
+  {
     name: 'showSmartGenerationView',
     description: "Shows the view for advanced AI deck creation, either from a form or by analyzing a document.",
     parameters: { type: Type.OBJECT, properties: {} },
@@ -292,6 +308,7 @@ Advanced Capabilities:
 - AI Deck Creation: You can create a full deck of cards on any topic for the user. Use the advanced 'Smart Generation' view (showSmartGenerationView) which allows creation from a form (generateDeckFromForm) or from a document (generateDeckFromDocument). Guide the user toward this feature for powerful content creation.
 - Adaptive Learning: You can analyze a user's weak points in a deck and generate new cards to help them improve using generateCardsFromWeakness.
 - Import & Upload: The user can import decks from a CSV file (showImportView). The 'Smart Generation' view is the primary way to use uploaded text.
+- Anki Sync: The user can import a deck directly from their local Anki Desktop app (showAnkiImportView) and keep it in sync (syncAnkiDeck). This only works when Anki Desktop is running on the same computer with the AnkiConnect add-on installed.
 - Image Generation: You can generate an image from a text prompt. Use showImageGenerationView to open the screen, or generate directly with generateImage.
 - Image Analysis: You can analyze an image the user uploads. Use showImageAnalysisView to open the screen.
 - Text Analysis: You can analyze any piece of text for the user. Use showTextAnalysisView to open the screen.

@@ -1,10 +1,11 @@
-import { Card, Deck, StudyGoal, StudyProgress, VoiceName } from '../types';
+import { AnkiSyncMeta, Card, Deck, StudyGoal, StudyProgress, VoiceName } from '../types';
 
 const DECKS_KEY = 'echoCards_decks';
 const CARDS_KEY = 'echoCards_cards';
 const STUDY_PROGRESS_KEY = 'echoCards_studyProgress';
 const VOICE_PREF_KEY = 'echoCards_voicePreference';
 const CONVERSATIONAL_MODE_KEY = 'echoCards_conversationalMode';
+const ANKI_SYNC_META_KEY = 'echoCards_ankiSyncMeta';
 
 const seedDecks: Deck[] = [
   { id: 'capitals-1', name: 'World Capitals' },
@@ -132,6 +133,14 @@ export const storageService = {
     localStorage.setItem(DECKS_KEY, JSON.stringify(updatedDecks));
     return newDeck;
   },
+  updateDeck: (updatedDeck: Deck): void => {
+    const allDecks = storageService.getDecks();
+    const deckIndex = allDecks.findIndex(d => d.id === updatedDeck.id);
+    if (deckIndex !== -1) {
+      allDecks[deckIndex] = updatedDeck;
+      localStorage.setItem(DECKS_KEY, JSON.stringify(allDecks));
+    }
+  },
   deleteDeck: (deckId: string): boolean => {
     const allDecks = storageService.getDecks();
     const allCards = storageService.getCards();
@@ -234,5 +243,18 @@ export const storageService = {
   getConversationalMode: (): boolean => {
     const saved = localStorage.getItem(CONVERSATIONAL_MODE_KEY);
     return saved ? JSON.parse(saved) : false;
+  },
+  getAnkiSyncMeta: (): AnkiSyncMeta => {
+    const raw = localStorage.getItem(ANKI_SYNC_META_KEY);
+    return raw ? JSON.parse(raw) : {};
+  },
+  setAnkiSyncMetaForDeck: (deckId: string, lastSyncedReviewTime: number): void => {
+    const meta = storageService.getAnkiSyncMeta();
+    meta[deckId] = { lastSyncedReviewTime };
+    localStorage.setItem(ANKI_SYNC_META_KEY, JSON.stringify(meta));
+  },
+  findCardByAnkiCardId: (ankiCardId: number): Card | null => {
+    const allCards = storageService.getCards();
+    return allCards.find(c => c.ankiCardId === ankiCardId) ?? null;
   },
 };
